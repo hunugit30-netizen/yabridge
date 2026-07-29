@@ -18,3 +18,6 @@ Throughout the session, update `memory.md` continuously as you learn things — 
 Append new information rather than replacing existing entries unless they are outdated. Mark outdated entries as superseded rather than deleting them.
 
 If `memory.md` does not exist, create it before doing anything else.
+## Build System
+
+Before making any changes, read `.github/workflows/build.yml` to understand how the project is built, what dependencies are required, what build containers are used, and how artifacts are produced. Match any new code or build changes to the patterns already established there.
