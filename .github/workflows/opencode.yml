@@ -89,7 +89,7 @@ jobs:
               client_max_body_size 0;
               client_body_buffer_size 10m;
               location / {
-                limit_req zone=nvidia_rpm burst=120 nodelay;
+                limit_req zone=nvidia_rpm burst=120;
                 proxy_pass http://nvidia_backends;
                 proxy_http_version 1.1;
                 proxy_set_header Connection '';
@@ -97,6 +97,9 @@ jobs:
                 proxy_buffering off;
                 proxy_read_timeout 600s;
                 proxy_send_timeout 600s;
+                proxy_next_upstream error timeout http_429 http_503;
+                proxy_next_upstream_tries 6;
+                proxy_next_upstream_timeout 120s;
               }
             }
           }
@@ -150,55 +153,19 @@ jobs:
           curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> $GITHUB_PATH
 
-      - name: Run opencode with retries
+      - name: Run opencode
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL: nvidia/nvidia/nemotron-3-ultra-550b-a55b
           USE_GITHUB_TOKEN: "true"
-          # Passed through from the action inputs
           AGENT: ""
           SHARE: ""
           PROMPT: ""
           MENTIONS: ""
           VARIANT: ""
           OIDC_BASE_URL: ""
-        run: |
-          # opencode github run logs to stdout in a human-readable SSE-derived
-          # format (not --format json). We tee to a log file and scan for
-          # known transient error strings to decide whether to retry.
-          RETRY_WAIT=30
-          ATTEMPT=1
-
-          is_retryable() {
-            local log="$1"
-            grep -qiE \
-              'ResourceExhausted|rate.?limit|503|502|timeout|ECONNRESET|socket hang up|Worker local total request limit' \
-              "$log"
-          }
-
-          while true; do
-            echo "=== opencode github run attempt $ATTEMPT ==="
-            RUN_LOG="/tmp/opencode-run-${ATTEMPT}.log"
-
-            opencode github run 2>&1 | tee "$RUN_LOG"
-            EXIT_CODE=${PIPESTATUS[0]}
-
-            if [ "$EXIT_CODE" -eq 0 ]; then
-              echo "opencode completed cleanly on attempt $ATTEMPT"
-              break
-            fi
-
-            if ! is_retryable "$RUN_LOG"; then
-              echo "Non-retryable failure on attempt $ATTEMPT (exit $EXIT_CODE)"
-              cat "$RUN_LOG"
-              exit "$EXIT_CODE"
-            fi
-
-            echo "Retryable error on attempt $ATTEMPT. Waiting ${RETRY_WAIT}s..."
-            sleep "$RETRY_WAIT"
-            ATTEMPT=$((ATTEMPT + 1))
-          done
+        run: opencode github run
 
       - name: Show nginx logs
         if: always()
