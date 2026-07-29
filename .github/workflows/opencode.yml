@@ -30,96 +30,109 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Start nginx rate limiter
+      - name: Start retry proxy
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_API_KEY_1: ${{ secrets.NVIDIA_API_KEY_1 }}
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq nginx-light
-          mkdir -p /tmp/nginx
+          cat > /tmp/proxy.py << 'PYEOF'
+          import http.server, urllib.request, urllib.error, json, os, time, sys, ssl, threading, itertools
 
-          if [ -n "$NVIDIA_API_KEY_1" ]; then
-            KEY1_BLOCK="
-          server {
-            listen 14447;
-            client_max_body_size 0;
-            location / {
-              proxy_pass https://integrate.api.nvidia.com;
-              proxy_set_header Host integrate.api.nvidia.com;
-              proxy_set_header Authorization \"Bearer ${NVIDIA_API_KEY_1}\";
-              proxy_ssl_server_name on;
-              proxy_read_timeout 600s;
-              proxy_send_timeout 600s;
-            }
-          }"
-            UPSTREAM_BLOCK="upstream nvidia_backends {
-            server 127.0.0.1:14446;
-            server 127.0.0.1:14447;
-          }"
-            RPM_RATE="60r/m"
-          else
-            KEY1_BLOCK=""
-            UPSTREAM_BLOCK="upstream nvidia_backends {
-            server 127.0.0.1:14446;
-          }"
-            RPM_RATE="30r/m"
-          fi
+          UPSTREAM = "https://integrate.api.nvidia.com"
+          PORT = 4445
+          MAX_RETRIES = 12
+          BASE_DELAY = 5
 
-          cat > /tmp/nginx/nginx.conf <<EOF
-          worker_processes 1;
-          error_log /tmp/nginx/error.log warn;
-          pid /tmp/nginx/nginx.pid;
-          events { worker_connections 1024; }
-          http {
-            access_log off;
-            resolver 8.8.8.8 valid=300s;
-            limit_req_zone \$binary_remote_addr zone=nvidia_rpm:10m rate=${RPM_RATE};
-            ${UPSTREAM_BLOCK}
-            server {
-              listen 14446;
-              client_max_body_size 0;
-              location / {
-                proxy_pass https://integrate.api.nvidia.com;
-                proxy_set_header Host integrate.api.nvidia.com;
-                proxy_set_header Authorization "Bearer ${NVIDIA_API_KEY}";
-                proxy_ssl_server_name on;
-                proxy_read_timeout 600s;
-                proxy_send_timeout 600s;
-              }
-            }
-            ${KEY1_BLOCK}
-            server {
-              listen 4445;
-              client_max_body_size 0;
-              client_body_buffer_size 10m;
-              location / {
-                limit_req zone=nvidia_rpm burst=120;
-                proxy_pass http://nvidia_backends;
-                proxy_http_version 1.1;
-                proxy_set_header Connection '';
-                proxy_request_buffering off;
-                proxy_buffering off;
-                proxy_read_timeout 600s;
-                proxy_send_timeout 600s;
-                proxy_next_upstream error timeout http_429 http_503;
-                proxy_next_upstream_tries 6;
-                proxy_next_upstream_timeout 120s;
-              }
-            }
-          }
-          EOF
+          keys = [k for k in [os.environ.get("NVIDIA_API_KEY"), os.environ.get("NVIDIA_API_KEY_1")] if k]
+          key_cycle = itertools.cycle(keys)
+          key_lock = threading.Lock()
 
-          sudo nginx -c /tmp/nginx/nginx.conf
+          def next_key():
+              with key_lock:
+                  return next(key_cycle)
+
+          ctx = ssl.create_default_context()
+
+          class Handler(http.server.BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  pass
+
+              def do_GET(self):
+                  self._proxy(None)
+
+              def do_POST(self):
+                  length = int(self.headers.get("Content-Length", 0))
+                  body = self.rfile.read(length) if length else b""
+                  self._proxy(body)
+
+              def _proxy(self, body):
+                  url = UPSTREAM + self.path
+                  delay = BASE_DELAY
+                  for attempt in range(MAX_RETRIES):
+                      key = next_key()
+                      headers = {k: v for k, v in self.headers.items()
+                                 if k.lower() not in ("host", "authorization", "content-length")}
+                      headers["Authorization"] = f"Bearer {key}"
+                      headers["Host"] = "integrate.api.nvidia.com"
+                      if body is not None:
+                          headers["Content-Length"] = str(len(body))
+                      req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+                      try:
+                          resp = urllib.request.urlopen(req, context=ctx, timeout=600)
+                          resp_body = resp.read()
+                          # Check for ResourceExhausted in a successful HTTP response
+                          try:
+                              obj = json.loads(resp_body)
+                              err = obj.get("error", {})
+                              msg = err.get("message", "") if isinstance(err, dict) else str(err)
+                              if "ResourceExhausted" in msg or "request limit" in msg.lower():
+                                  raise _RateLimitError(msg)
+                          except (json.JSONDecodeError, AttributeError):
+                              pass
+                          self.send_response(resp.status)
+                          for k, v in resp.headers.items():
+                              if k.lower() not in ("transfer-encoding",):
+                                  self.send_header(k, v)
+                          self.end_headers()
+                          self.wfile.write(resp_body)
+                          return
+                      except _RateLimitError as e:
+                          print(f"[proxy] ResourceExhausted (attempt {attempt+1}/{MAX_RETRIES}), "
+                                f"backing off {delay}s: {e}", flush=True)
+                      except urllib.error.HTTPError as e:
+                          if e.code in (429, 503) and attempt < MAX_RETRIES - 1:
+                              print(f"[proxy] HTTP {e.code} (attempt {attempt+1}/{MAX_RETRIES}), "
+                                    f"backing off {delay}s", flush=True)
+                          else:
+                              self.send_response(e.code)
+                              self.end_headers()
+                              self.wfile.write(e.read())
+                              return
+                      time.sleep(delay)
+                      delay = min(delay * 2, 60)
+                  self.send_response(503)
+                  self.end_headers()
+                  self.wfile.write(b'{"error":"max retries exceeded"}')
+
+          class _RateLimitError(Exception):
+              pass
+
+          server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+          print(f"[proxy] listening on {PORT}", flush=True)
+          server.serve_forever()
+          PYEOF
+
+          python3 /tmp/proxy.py &
+          echo $! > /tmp/proxy.pid
+
           for i in $(seq 1 15); do
             if curl -sf http://127.0.0.1:4445/v1/models > /dev/null 2>&1; then
-              echo "rate limiter up"
+              echo "proxy up"
               exit 0
             fi
             sleep 1
           done
-          echo "nginx failed to start"
-          cat /tmp/nginx/error.log
+          echo "proxy failed to start"
           exit 1
 
       - name: Write opencode provider config
@@ -172,6 +185,6 @@ jobs:
           OIDC_BASE_URL: ""
         run: opencode github run
 
-      - name: Show nginx logs
+      - name: Show proxy logs
         if: always()
-        run: cat /tmp/nginx/error.log || true
+        run: kill $(cat /tmp/proxy.pid 2>/dev/null) 2>/dev/null || true
