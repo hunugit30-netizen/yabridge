@@ -7,7 +7,6 @@ ara_api_include_dir = include_directories('ARA_API')
 # Host library sources
 ara_host_sources = [
   'ARA_Library/Dispatch/ARAHostDispatch.cpp',
-  'ARA_Library/Dispatch/ARADispatchBase.cpp',
   'ARA_Library/PlugIn/ARAPlug.cpp',
   'ARA_Library/Utilities/ARAChannelFormat.cpp',
   'ARA_Library/Utilities/ARAPitchInterpretation.cpp',
@@ -19,7 +18,6 @@ ara_host_sources = [
 # Plugin library sources (same as host but with plugin dispatch)
 ara_plugin_sources = [
   'ARA_Library/Dispatch/ARAPlugInDispatch.cpp',
-  'ARA_Library/Dispatch/ARADispatchBase.cpp',
   'ARA_Library/PlugIn/ARAPlug.cpp',
   'ARA_Library/Utilities/ARAChannelFormat.cpp',
   'ARA_Library/Utilities/ARAPitchInterpretation.cpp',
