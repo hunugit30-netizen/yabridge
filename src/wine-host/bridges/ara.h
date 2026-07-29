@@ -19,6 +19,8 @@
 #include <map>
 #include <shared_mutex>
 #include <string>
+#include <optional>
+#include <vector>
 
 #include <clap/entry.h>
 #include <clap/factory/plugin-factory.h>
@@ -36,6 +38,10 @@
 #include "ARAInterface.h"
 #include "ARAPlug.h"
 #endif
+
+// VST3 Hosting
+#include <public.sdk/source/vst/hosting/module.h>
+#include <pluginterfaces/vst/ivstpluginterfaces.h>
 
 /**
  * This hosts the ARA functionality of a Windows VST3 plugin. ARA plugins are
@@ -144,6 +150,8 @@ class ARABridge : public HostBridge {
      */
 #ifdef WITH_ARA
     ARA::PlugIn::Factory* ara_factory_ = nullptr;
+#else
+    void* ara_factory_raw_ = nullptr;
 #endif
 
     /**
@@ -152,4 +160,34 @@ class ARABridge : public HostBridge {
      * response.
      */
     MutualRecursionHelper<Win32Thread> mutual_recursion_;
+
+    /**
+     * VST3 module for loading the plugin.
+     */
+    std::shared_ptr<VST3::Hosting::Win32Module> module_;
+
+    /**
+     * Map of plugin instances by instance ID.
+     */
+    struct PluginInstance {
+        Steinberg::IPtr<Steinberg::FUnknown> object;
+        Steinberg::FUnknownPtr<Steinberg::Vst::IComponent> component;
+        Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> audio_processor;
+        bool is_initialized = false;
+        bool supports_ara = false;
+    };
+    std::map<size_t, PluginInstance> object_instances_;
+    std::shared_mutex object_instances_mutex_;
+
+    /**
+     * Initialize the ARA factory by querying the VST3 plugin.
+     */
+    void initialize_ara_factory();
+
+    /**
+     * Get a plugin instance by ID.
+     */
+    std::pair<PluginInstance&, std::shared_lock<std::shared_mutex>>
+    get_instance(size_t instance_id) noexcept;
 };
+

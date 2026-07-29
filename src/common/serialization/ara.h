@@ -17,8 +17,11 @@
 #pragma once
 
 #include <variant>
+#include <optional>
+#include <string>
 
 #include "../bitsery/ext/in-place-variant.h"
+#include "../bitsery/ext/in-place-optional.h"
 #include "../utils.h"
 #include "common.h"
 
@@ -143,3 +146,66 @@ struct GetARAFactoryRequest {
         // No payload needed
     }
 };
+
+/**
+ * ARA Plugin Factory Proxy - wraps around ARA::PlugIn::Factory for serialization
+ */
+class AraPluginFactoryProxy {
+   public:
+    /**
+     * These are the arguments for creating an `AraPluginFactoryProxy`.
+     */
+    struct ConstructArgs {
+        ConstructArgs() noexcept;
+        
+        // Read from an existing ARA factory implementation
+        ConstructArgs(void* ara_factory);
+
+        bool supports_ara_factory = false;
+        std::string ara_factory_id;  // CLSID of the ARA factory (e.g., "ARAFactory")
+        uint64_t ara_factory_vtable = 0;  // Opaque pointer to the ARA factory vtable
+        
+        // ARA factory info (ARA 2.0+)
+        struct FactoryInfo {
+            uint64_t factory_id = 0;       // CLSID of the factory
+            uint64_t version = 0;          // ARA version
+            uint64_t vendor_id = 0;        // Vendor ID
+            std::string vendor_name;       // Vendor name
+            std::string product_name;      // Product name
+            std::string version_string;    // Version string
+        };
+        std::optional<FactoryInfo> factory_info;
+
+        template <typename S>
+        void serialize(S& s) {
+            s.value1b(supports_ara_factory);
+            s.text1b(ara_factory_id, 256);
+            s.value8b(ara_factory_vtable);
+            s.ext(factory_info, bitsery::ext::InPlaceOptional{});
+        }
+    };
+
+    /**
+     * Message to request the Windows ARA plugin's factory information
+     * from the Wine plugin host.
+     */
+    struct Construct {
+        using Response = ConstructArgs;
+
+        template <typename S>
+        void serialize(S&) {}
+    };
+
+    AraPluginFactoryProxy(ConstructArgs&& args) noexcept;
+    virtual ~AraPluginFactoryProxy() noexcept = default;
+
+    /**
+     * Get the ARA factory for the given factory ID (CLSID).
+     * This is the native plugin's implementation.
+     */
+    virtual const void* get_factory(const char* factory_id) = 0;
+
+   protected:
+    ConstructArgs arguments_;
+};
+

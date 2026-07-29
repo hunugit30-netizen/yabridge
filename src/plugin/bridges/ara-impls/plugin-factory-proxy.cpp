@@ -14,7 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "../../common/serialization/ara.h"
+#include "plugin-factory-proxy.h"
 
-// Placeholder for ARA plugin factory proxy implementation
-// This will be implemented when full ARA interface proxying is added
+#include <cstring>
+
+#include "../../../common/serialization/ara.h"
+#include "../ara.h"
+
+AraPluginFactoryProxyImpl::AraPluginFactoryProxyImpl(
+    AraPluginBridge& bridge,
+    AraPluginFactoryProxy::ConstructArgs&& args) noexcept
+    : AraPluginFactoryProxy(std::move(args)), bridge_(bridge) {}
+
+const void* AraPluginFactoryProxyImpl::get_factory(const char* factory_id) {
+    // Check if the host is requesting the ARA factory
+    // ARA factory ID is typically "ARAFactory" or a specific CLSID
+    if (factory_id && arguments_.supports_ara_factory && 
+        (std::strcmp(factory_id, "ARAFactory") == 0 || 
+         std::strcmp(factory_id, arguments_.ara_factory_id.c_str()) == 0)) {
+        // Return the ARA factory from the Wine host
+        // This will be a pointer to the ARA::PlugIn::Factory interface
+        return reinterpret_cast<const void*>(arguments_.ara_factory_vtable);
+    }
+    
+    return nullptr;
+}
+

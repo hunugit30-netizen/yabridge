@@ -107,3 +107,4 @@ class AraPluginBridge : public PluginBridge<ARASockets<std::jthread>> {
      */
     MutualRecursionHelper<std::jthread> mutual_recursion_;
 };
+

@@ -19,6 +19,8 @@
 #include <iostream>
 #include <filesystem>
 
+#include "ara-impls/plugin-factory-proxy.h"
+
 namespace fs = ghc::filesystem;
 
 AraPluginBridge::AraPluginBridge(const fs::path& plugin_path)
@@ -34,14 +36,24 @@ AraPluginBridge::AraPluginBridge(const fs::path& plugin_path)
     connect_sockets_guarded();
     warn_on_version_mismatch(sockets_.host_version_.get());
     
-    // TODO: Implement ARA-specific initialization
-    // This would connect to the Wine host and query for ARA factory
+    // Initialize the ARA plugin factory proxy by querying the Wine host
+    // The Wine host will load the Windows VST3/ARA plugin and query its ARA factory
+    AraPluginFactoryProxy::ConstructArgs factory_args =
+        sockets_.plugin_host_control_.send_message(
+            AraPluginFactoryProxy::Construct{},
+            std::pair<ARALogger&, bool>(logger_, true));
+    
+    plugin_factory_ = std::make_unique<AraPluginFactoryProxyImpl>(*this, std::move(factory_args));
 }
 
 AraPluginBridge::~AraPluginBridge() noexcept = default;
 
 const void* AraPluginBridge::get_factory(const char* factory_id) {
-    // TODO: Implement ARA factory query
-    // For now return nullptr - the host will fall back to VST3 factory
+    // Delegate to the plugin factory proxy
+    if (plugin_factory_) {
+        return plugin_factory_->get_factory(factory_id);
+    }
+    
     return nullptr;
 }
+

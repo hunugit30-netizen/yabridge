@@ -151,3 +151,4 @@ extern "C" YABRIDGE_EXPORT void* yabridge_module_get_factory(
 extern "C" YABRIDGE_EXPORT const char* yabridge_version() {
     return yabridge_git_version;
 }
+
