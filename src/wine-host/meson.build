@@ -25,6 +25,9 @@ if is_64bit_system
       wine_shell32_dep,
       wine_uuid_dep,
     ]
+    if with_ara
+      host_64bit_deps += [ara_host_wine_64bit_dep]
+    endif
   endif
 endif
 
@@ -53,6 +56,9 @@ if with_bitbridge
       wine_shell32_dep,
       wine_uuid_dep,
     ]
+    if with_ara
+      host_32bit_deps += [ara_host_wine_32bit_dep]
+    endif
   endif
 endif
 

@@ -1,0 +1,62 @@
+diff --git a/meson.build b/meson.build
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/meson.build
+@@ -0,0 +1,55 @@
++project('ara', 'cpp', version : '2.3.0', default_options : ['warning_level=0'])
++
++# ARA_API is header-only
++ara_api_include_dir = include_directories('ARA_API')
++
++# ARA_Library sources
++# Host library sources
++ara_host_sources = [
++  'ARA_Library/Dispatch/ARAHostDispatch.cpp',
++  'ARA_Library/Dispatch/ARADispatchBase.cpp',
++  'ARA_Library/PlugIn/ARAPlug.cpp',
++  'ARA_Library/Utilities/ARAChannelFormat.cpp',
++  'ARA_Library/Utilities/ARAPitchInterpretation.cpp',
++  'ARA_Library/Utilities/ARASamplePositionConversion.cpp',
++  'ARA_Library/Utilities/ARAStdVectorUtilities.cpp',
++  'ARA_Library/Utilities/ARATimelineConversion.cpp',
++]
++
++# Plugin library sources (same as host but with plugin dispatch)
++ara_plugin_sources = [
++  'ARA_Library/Dispatch/ARAPlugInDispatch.cpp',
++  'ARA_Library/Dispatch/ARADispatchBase.cpp',
++  'ARA_Library/PlugIn/ARAPlug.cpp',
++  'ARA_Library/Utilities/ARAChannelFormat.cpp',
++  'ARA_Library/Utilities/ARAPitchInterpretation.cpp',
++  'ARA_Library/Utilities/ARASamplePositionConversion.cpp',
++  'ARA_Library/Utilities/ARAStdVectorUtilities.cpp',
++  'ARA_Library/Utilities/ARATimelineConversion.cpp',
++]
++
++# Common include directories for ARA_Library
++ara_lib_include_dirs = [
++  include_directories('ARA_API'),
++  include_directories('ARA_Library'),
++  include_directories('ARA_Library/Dispatch'),
++  include_directories('ARA_Library/PlugIn'),
++  include_directories('ARA_Library/Utilities'),
++]
++
++# Host library
++ara_host_lib = static_library('ara_host', ara_host_sources, include_directories : ara_lib_include_dirs)
++ara_host_dep = declare_dependency(link_with : ara_host_lib, include_directories : ara_lib_include_dirs)
++
++# Plugin library
++ara_plugin_lib = static_library('ara_plugin', ara_plugin_sources, include_directories : ara_lib_include_dirs)
++ara_plugin_dep = declare_dependency(link_with : ara_plugin_lib, include_directories : ara_lib_include_dirs)
++
++# Set variables for parent meson.build
++set_variable('ara_api_include_dir', ara_api_include_dir)
++set_variable('ara_lib_include_dir', include_directories('ARA_Library'))
++set_variable('ara_host_lib', ara_host_lib)
++set_variable('ara_plugin_lib', ara_plugin_lib)
++set_variable('ara_host_dep', ara_host_dep)
++set_variable('ara_plugin_dep', ara_plugin_dep)
++set_variable('ara_host_sources', ara_host_sources)
++set_variable('ara_plugin_sources', ara_plugin_sources)

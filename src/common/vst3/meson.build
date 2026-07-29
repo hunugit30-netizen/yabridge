@@ -132,3 +132,120 @@ if with_bitbridge
     compile_args : vst3_compiler_options + wine_32bit_compiler_options,
   )
 endif
+
+#
+# ARA SDK integration (only when VST3 is enabled and ARA is enabled)
+#
+if with_ara
+  ara = subproject('ara')
+
+  # Get variables from the ARA subproject
+  ara_api_include_dir = ara.get_variable('ara_api_include_dir')
+  ara_lib_include_dir = ara.get_variable('ara_lib_include_dir')
+  ara_host_lib_native = ara.get_variable('ara_host_lib')
+  ara_plugin_lib_native = ara.get_variable('ara_plugin_lib')
+  ara_host_dep_native = ara.get_variable('ara_host_dep')
+  ara_plugin_dep_native = ara.get_variable('ara_plugin_dep')
+
+  # Compiler options - include the normal ones plus ARA-specific ones
+  ara_compiler_options = compiler_options
+
+  # ARA SDK base directory (for any patching if needed)
+  ara_sdk_base_dir = meson.current_source_dir()
+
+  #
+  # ARA dependencies
+  #
+
+  # ARA API dependency (header-only)
+  ara_api_dep = declare_dependency(
+    include_directories: ara_api_include_dir,
+  )
+
+  # Native ARA dependencies (for VST3 plugin proxy)
+  ara_host_native_dep = declare_dependency(
+    link_with: ara_host_lib_native,
+    include_directories: [ara_api_include_dir, ara_lib_include_dir],
+    compile_args: ara_compiler_options,
+  )
+  ara_plugin_native_dep = declare_dependency(
+    link_with: ara_plugin_lib_native,
+    include_directories: [ara_api_include_dir, ara_lib_include_dir],
+    compile_args: ara_compiler_options,
+  )
+
+  # Wine 64-bit ARA libraries (for wine-host)
+  if is_64bit_system
+    ara_host_wine_64bit = static_library(
+      'ara_host_wine_64bit',
+      ara.get_variable('ara_host_sources'),
+      native: false,
+      cpp_args: ara_compiler_options + wine_64bit_compiler_options,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      override_options: ['warning_level=0'],
+    )
+    ara_plugin_wine_64bit = static_library(
+      'ara_plugin_wine_64bit',
+      ara.get_variable('ara_plugin_sources'),
+      native: false,
+      cpp_args: ara_compiler_options + wine_64bit_compiler_options,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      override_options: ['warning_level=0'],
+    )
+
+    ara_host_wine_64bit_dep = declare_dependency(
+      link_with: ara_host_wine_64bit,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      compile_args: ara_compiler_options + wine_64bit_compiler_options,
+    )
+    ara_plugin_wine_64bit_dep = declare_dependency(
+      link_with: ara_plugin_wine_64bit,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      compile_args: ara_compiler_options + wine_64bit_compiler_options,
+    )
+  endif
+
+  # Wine 32-bit ARA libraries (for 32-bit wine-host)
+  if with_bitbridge
+    ara_host_wine_32bit = static_library(
+      'ara_host_wine_32bit',
+      ara.get_variable('ara_host_sources'),
+      native: false,
+      cpp_args: ara_compiler_options + wine_32bit_compiler_options,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      override_options: ['warning_level=0'],
+    )
+    ara_plugin_wine_32bit = static_library(
+      'ara_plugin_wine_32bit',
+      ara.get_variable('ara_plugin_sources'),
+      native: false,
+      cpp_args: ara_compiler_options + wine_32bit_compiler_options,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      override_options: ['warning_level=0'],
+    )
+
+    ara_host_wine_32bit_dep = declare_dependency(
+      link_with: ara_host_wine_32bit,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      compile_args: ara_compiler_options + wine_32bit_compiler_options,
+    )
+    ara_plugin_wine_32bit_dep = declare_dependency(
+      link_with: ara_plugin_wine_32bit,
+      include_directories: [ara_api_include_dir, ara_lib_include_dir],
+      compile_args: ara_compiler_options + wine_32bit_compiler_options,
+    )
+  endif
+
+  # Expose variables for parent meson.build
+  set_variable('ara_api_dep', ara_api_dep)
+  set_variable('ara_host_native_dep', ara_host_native_dep)
+  set_variable('ara_plugin_native_dep', ara_plugin_native_dep)
+  if is_64bit_system
+    set_variable('ara_host_wine_64bit_dep', ara_host_wine_64bit_dep)
+    set_variable('ara_plugin_wine_64bit_dep', ara_plugin_wine_64bit_dep)
+  endif
+  if with_bitbridge
+    set_variable('ara_host_wine_32bit_dep', ara_host_wine_32bit_dep)
+    set_variable('ara_plugin_wine_32bit_dep', ara_plugin_wine_32bit_dep)
+  endif
+endif

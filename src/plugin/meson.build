@@ -47,6 +47,9 @@ if with_vst3
     tomlplusplus_dep,
     vst3_sdk_native_dep,
   ]
+  if with_ara
+    vst3_plugin_deps += [ara_plugin_native_dep]
+  endif
 endif
 
 vst2_plugin_sources = files(

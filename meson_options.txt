@@ -25,3 +25,10 @@ option(
   value : false,
   description : 'Whether to run the Wine plugin host with GDB attached. Might not always be reliable.'
 )
+
+option(
+  'ara',
+  type : 'boolean',
+  value : true,
+  description : 'Whether to build with ARA (Audio Random Access) support for VST3. Requires VST3 support to be enabled.'
+)
