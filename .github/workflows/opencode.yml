@@ -12,6 +12,7 @@ jobs:
       contains(github.event.comment.body, '/oc') ||
       contains(github.event.comment.body, '/opencode')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       issues: write
@@ -24,11 +25,181 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Run opencode
-        uses: anomalyco/opencode/github@latest
+      - name: Start nginx rate limiter
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_API_KEY_1: ${{ secrets.NVIDIA_API_KEY_1 }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx-light
+          mkdir -p /tmp/nginx
+
+          if [ -n "$NVIDIA_API_KEY_1" ]; then
+            KEY1_BLOCK="
+          server {
+            listen 14447;
+            client_max_body_size 0;
+            location / {
+              proxy_pass https://integrate.api.nvidia.com;
+              proxy_set_header Host integrate.api.nvidia.com;
+              proxy_set_header Authorization \"Bearer ${NVIDIA_API_KEY_1}\";
+              proxy_ssl_server_name on;
+              proxy_read_timeout 600s;
+              proxy_send_timeout 600s;
+            }
+          }"
+            UPSTREAM_BLOCK="upstream nvidia_backends {
+            server 127.0.0.1:14446;
+            server 127.0.0.1:14447;
+          }"
+            RPM_RATE="60r/m"
+          else
+            KEY1_BLOCK=""
+            UPSTREAM_BLOCK="upstream nvidia_backends {
+            server 127.0.0.1:14446;
+          }"
+            RPM_RATE="30r/m"
+          fi
+
+          cat > /tmp/nginx/nginx.conf <<EOF
+          worker_processes 1;
+          error_log /tmp/nginx/error.log warn;
+          pid /tmp/nginx/nginx.pid;
+          events { worker_connections 1024; }
+          http {
+            access_log off;
+            resolver 8.8.8.8 valid=300s;
+            limit_req_zone \$binary_remote_addr zone=nvidia_rpm:10m rate=${RPM_RATE};
+            ${UPSTREAM_BLOCK}
+            server {
+              listen 14446;
+              client_max_body_size 0;
+              location / {
+                proxy_pass https://integrate.api.nvidia.com;
+                proxy_set_header Host integrate.api.nvidia.com;
+                proxy_set_header Authorization "Bearer ${NVIDIA_API_KEY}";
+                proxy_ssl_server_name on;
+                proxy_read_timeout 600s;
+                proxy_send_timeout 600s;
+              }
+            }
+            ${KEY1_BLOCK}
+            server {
+              listen 4445;
+              client_max_body_size 0;
+              client_body_buffer_size 10m;
+              location / {
+                limit_req zone=nvidia_rpm burst=120 nodelay;
+                proxy_pass http://nvidia_backends;
+                proxy_http_version 1.1;
+                proxy_set_header Connection '';
+                proxy_request_buffering off;
+                proxy_buffering off;
+                proxy_read_timeout 600s;
+                proxy_send_timeout 600s;
+              }
+            }
+          }
+          EOF
+
+          sudo nginx -c /tmp/nginx/nginx.conf
+          for i in $(seq 1 15); do
+            if curl -sf http://127.0.0.1:4445/v1/models > /dev/null 2>&1; then
+              echo "rate limiter up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "nginx failed to start"
+          cat /tmp/nginx/error.log
+          exit 1
+
+      - name: Write opencode provider config
+        env:
+          NVIDIA_MODEL_CONTEXT_WINDOW: ${{ secrets.NVIDIA_MODEL_CONTEXT_WINDOW || '1048576' }}
+        run: |
+          cat > opencode.json <<EOF
+          {
+            "\$schema": "https://opencode.ai/config.json",
+            "provider": {
+              "nvidia": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "NVIDIA NIM (rate limited)",
+                "options": {
+                  "baseURL": "http://127.0.0.1:4445/v1",
+                  "apiKey": "unused-injected-by-nginx"
+                },
+                "models": {
+                  "nvidia/nemotron-3-ultra-550b-a55b": {
+                    "limit": {
+                      "context": ${NVIDIA_MODEL_CONTEXT_WINDOW},
+                      "output": 8192
+                    }
+                  }
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Install opencode
+        run: |
+          VERSION=$(curl -sf https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+          echo "Installing opencode ${VERSION:-latest}"
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+
+      - name: Run opencode with retries
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: nvidia/nvidia/nemotron-3-ultra-550b-a55b
-          use_github_token: true
+          MODEL: nvidia/nvidia/nemotron-3-ultra-550b-a55b
+          USE_GITHUB_TOKEN: "true"
+          # Passed through from the action inputs
+          AGENT: ""
+          SHARE: ""
+          PROMPT: ""
+          MENTIONS: ""
+          VARIANT: ""
+          OIDC_BASE_URL: ""
+        run: |
+          # opencode github run logs to stdout in a human-readable SSE-derived
+          # format (not --format json). We tee to a log file and scan for
+          # known transient error strings to decide whether to retry.
+          RETRY_WAIT=30
+          ATTEMPT=1
+
+          is_retryable() {
+            local log="$1"
+            grep -qiE \
+              'ResourceExhausted|rate.?limit|503|502|timeout|ECONNRESET|socket hang up|Worker local total request limit' \
+              "$log"
+          }
+
+          while true; do
+            echo "=== opencode github run attempt $ATTEMPT ==="
+            RUN_LOG="/tmp/opencode-run-${ATTEMPT}.log"
+
+            opencode github run 2>&1 | tee "$RUN_LOG"
+            EXIT_CODE=${PIPESTATUS[0]}
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "opencode completed cleanly on attempt $ATTEMPT"
+              break
+            fi
+
+            if ! is_retryable "$RUN_LOG"; then
+              echo "Non-retryable failure on attempt $ATTEMPT (exit $EXIT_CODE)"
+              cat "$RUN_LOG"
+              exit "$EXIT_CODE"
+            fi
+
+            echo "Retryable error on attempt $ATTEMPT. Waiting ${RETRY_WAIT}s..."
+            sleep "$RETRY_WAIT"
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+      - name: Show nginx logs
+        if: always()
+        run: cat /tmp/nginx/error.log || true
