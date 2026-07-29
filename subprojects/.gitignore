@@ -8,6 +8,7 @@
 /ghc_filesystem
 /tomlplusplus
 /vst3
+/ara
 
 # And we obviously don't want to ignore our overlays
 !/packagefiles/asio
@@ -15,4 +16,6 @@
 !/packagefiles/clap
 !/packagefiles/function2
 !/packagefiles/ghc_filesystem
+!/packagefiles/ara
 !/function2-patch/*
+!/ara/*
