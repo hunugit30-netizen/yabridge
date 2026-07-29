@@ -5,7 +5,7 @@ url = https://github.com/Celemony/ARA_SDK.git
 revision = releases/2.3.0
 clone-recursive = true
 depth = 1
-patch_directory = ara
+patch_directory = ara-patches
 
 [provide]
 ara = ara_dep
