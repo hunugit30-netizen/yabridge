@@ -36,14 +36,18 @@ jobs:
           NVIDIA_API_KEY_1: ${{ secrets.NVIDIA_API_KEY_1 }}
         run: |
           cat > /tmp/proxy.py << 'PYEOF'
-          import http.server, urllib.request, urllib.error, json, os, time, sys, ssl, threading, itertools
+          import http.server, urllib.request, urllib.error
+          import json, os, time, ssl, threading, itertools, sys
 
           UPSTREAM = "https://integrate.api.nvidia.com"
           PORT = 4445
-          MAX_RETRIES = 12
-          BASE_DELAY = 5
+          MAX_RETRIES = 0  # 0 = unlimited
+          BASE_DELAY = 30
 
           keys = [k for k in [os.environ.get("NVIDIA_API_KEY"), os.environ.get("NVIDIA_API_KEY_1")] if k]
+          if not keys:
+              print("[proxy] ERROR: no API keys found", flush=True)
+              sys.exit(1)
           key_cycle = itertools.cycle(keys)
           key_lock = threading.Lock()
 
@@ -52,6 +56,39 @@ jobs:
                   return next(key_cycle)
 
           ctx = ssl.create_default_context()
+
+          def _is_rate_limit_error(data: bytes) -> bool:
+              """Check if a response chunk contains a ResourceExhausted error."""
+              try:
+                  text = data.decode("utf-8", errors="replace")
+                  # SSE stream: data: {"error": ...}
+                  for line in text.splitlines():
+                      line = line.strip()
+                      if line.startswith("data:"):
+                          payload = line[5:].strip()
+                          if not payload or payload == "[DONE]":
+                              continue
+                          try:
+                              obj = json.loads(payload)
+                          except json.JSONDecodeError:
+                              continue
+                          err = obj.get("error", {})
+                          msg = (err.get("message", "") if isinstance(err, dict) else str(err))
+                          if "ResourceExhausted" in msg or "request limit" in msg.lower():
+                              return True
+                      # Non-SSE JSON error body
+                      elif line.startswith("{"):
+                          try:
+                              obj = json.loads(line)
+                              err = obj.get("error", {})
+                              msg = (err.get("message", "") if isinstance(err, dict) else str(err))
+                              if "ResourceExhausted" in msg or "request limit" in msg.lower():
+                                  return True
+                          except json.JSONDecodeError:
+                              pass
+              except Exception:
+                  pass
+              return False
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):
@@ -68,54 +105,63 @@ jobs:
               def _proxy(self, body):
                   url = UPSTREAM + self.path
                   delay = BASE_DELAY
-                  for attempt in range(MAX_RETRIES):
+
+                  for attempt in itertools.count():
                       key = next_key()
-                      headers = {k: v for k, v in self.headers.items()
-                                 if k.lower() not in ("host", "authorization", "content-length")}
-                      headers["Authorization"] = f"Bearer {key}"
-                      headers["Host"] = "integrate.api.nvidia.com"
+                      fwd = {k: v for k, v in self.headers.items()
+                             if k.lower() not in ("host", "authorization", "content-length")}
+                      fwd["Authorization"] = f"Bearer {key}"
+                      fwd["Host"] = "integrate.api.nvidia.com"
                       if body is not None:
-                          headers["Content-Length"] = str(len(body))
-                      req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+                          fwd["Content-Length"] = str(len(body))
+
+                      req = urllib.request.Request(
+                          url, data=body, headers=fwd, method=self.command)
                       try:
                           resp = urllib.request.urlopen(req, context=ctx, timeout=600)
-                          resp_body = resp.read()
-                          # Check for ResourceExhausted in a successful HTTP response
-                          try:
-                              obj = json.loads(resp_body)
-                              err = obj.get("error", {})
-                              msg = err.get("message", "") if isinstance(err, dict) else str(err)
-                              if "ResourceExhausted" in msg or "request limit" in msg.lower():
-                                  raise _RateLimitError(msg)
-                          except (json.JSONDecodeError, AttributeError):
-                              pass
-                          self.send_response(resp.status)
-                          for k, v in resp.headers.items():
-                              if k.lower() not in ("transfer-encoding",):
-                                  self.send_header(k, v)
-                          self.end_headers()
-                          self.wfile.write(resp_body)
-                          return
-                      except _RateLimitError as e:
-                          print(f"[proxy] ResourceExhausted (attempt {attempt+1}/{MAX_RETRIES}), "
-                                f"backing off {delay}s: {e}", flush=True)
                       except urllib.error.HTTPError as e:
-                          if e.code in (429, 503) and attempt < MAX_RETRIES - 1:
-                              print(f"[proxy] HTTP {e.code} (attempt {attempt+1}/{MAX_RETRIES}), "
-                                    f"backing off {delay}s", flush=True)
-                          else:
-                              self.send_response(e.code)
-                              self.end_headers()
-                              self.wfile.write(e.read())
-                              return
-                      time.sleep(delay)
-                      delay = min(delay * 2, 60)
-                  self.send_response(503)
-                  self.end_headers()
-                  self.wfile.write(b'{"error":"max retries exceeded"}')
+                          if e.code in (429, 503):
+                              print(f"[proxy] HTTP {e.code} attempt {attempt+1}, "
+                                    f"retry in {delay}s", flush=True)
+                              time.sleep(delay)
+                              delay = min(delay * 2, 60)
+                              continue
+                          self.send_response(e.code)
+                          self.end_headers()
+                          self.wfile.write(e.read())
+                          return
+                      except Exception as e:
+                          print(f"[proxy] connection error attempt {attempt+1}: {e}", flush=True)
+                          time.sleep(delay)
+                          delay = min(delay * 2, 60)
+                          continue
 
-          class _RateLimitError(Exception):
-              pass
+                      # Read the first chunk to check for ResourceExhausted
+                      first_chunk = resp.read(4096)
+                      if _is_rate_limit_error(first_chunk):
+                          print(f"[proxy] ResourceExhausted attempt {attempt+1}, "
+                                f"retry in {delay}s", flush=True)
+                          time.sleep(delay)
+                          delay = min(delay * 2, 60)
+                          continue
+
+                      # Good response — forward headers then stream the rest
+                      self.send_response(resp.status)
+                      for k, v in resp.headers.items():
+                          if k.lower() not in ("transfer-encoding",):
+                              self.send_header(k, v)
+                      self.end_headers()
+                      try:
+                          self.wfile.write(first_chunk)
+                          while True:
+                              chunk = resp.read(65536)
+                              if not chunk:
+                                  break
+                              self.wfile.write(chunk)
+                          self.wfile.flush()
+                      except (BrokenPipeError, ConnectionResetError):
+                          pass
+                      return
 
           server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
           print(f"[proxy] listening on {PORT}", flush=True)
