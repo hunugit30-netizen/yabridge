@@ -172,5 +172,10 @@ if with_ara
     '../common/logging/ara.cpp',
     '../common/serialization/ara.cpp',
     'bridges/ara.cpp',
+    'bridges/ara-factory-proxy.cpp',
+    'bridges/ara-document-controller-proxy.cpp',
+    'bridges/ara-editor-renderer-proxy.cpp',
+    'bridges/ara-editor-view-proxy.cpp',
+    'bridges/ara-playback-renderer-proxy.cpp',
   )
 endif

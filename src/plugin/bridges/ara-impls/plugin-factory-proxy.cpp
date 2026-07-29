@@ -16,10 +16,7 @@
 
 #include "plugin-factory-proxy.h"
 
-#include <cstring>
-
-#include "../../../common/serialization/ara.h"
-#include "../ara.h"
+#include "ara.h"
 
 AraPluginFactoryProxyImpl::AraPluginFactoryProxyImpl(
     AraPluginBridge& bridge,
@@ -27,16 +24,12 @@ AraPluginFactoryProxyImpl::AraPluginFactoryProxyImpl(
     : AraPluginFactoryProxy(std::move(args)), bridge_(bridge) {}
 
 const void* AraPluginFactoryProxyImpl::get_factory(const char* factory_id) {
-    // Check if the host is requesting the ARA factory
-    // ARA factory ID is typically "ARAFactory" or a specific CLSID
-    if (factory_id && arguments_.supports_ara_factory && 
-        (std::strcmp(factory_id, "ARAFactory") == 0 || 
-         std::strcmp(factory_id, arguments_.ara_factory_id.c_str()) == 0)) {
-        // Return the ARA factory from the Wine host
-        // This will be a pointer to the ARA::PlugIn::Factory interface
+    // The factory info was serialized from the Wine host side
+    // For ARA, the factory is typically queried by a well-known ID like "ARAFactory"
+    if (arguments_.supports_ara_factory) {
+        // Return the stored vtable pointer (opaque to the plugin side)
         return reinterpret_cast<const void*>(arguments_.ara_factory_vtable);
     }
     
     return nullptr;
 }
-

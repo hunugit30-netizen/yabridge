@@ -26,6 +26,7 @@
 #include "vst3-impls/context-menu-proxy.h"
 #include "vst3-impls/host-context-proxy.h"
 #include "vst3-impls/plug-frame-proxy.h"
+#include "../../common/serialization/ara.h"
 
 // Generated inside of the build directory
 #include <version.h>
@@ -54,6 +55,7 @@ ARABridge::ARABridge(MainContext& main_context,
       logger_(generic_logger_),
       sockets_(main_context_.context_, endpoint_base_dir, false),
       current_instance_id_(0),
+      next_controller_ref_(1),
       plugin_factory_(nullptr, [](Steinberg::IPluginFactory* f) { if (f) f->release(); }) {
     std::string error;
     // Load the Windows VST3 plugin using Wine
@@ -76,6 +78,18 @@ ARABridge::ARABridge(MainContext& main_context,
 
     // Try to get the ARA factory from the VST3 plugin
     initialize_ara_factory();
+
+    // Create the ARA factory proxy for serialization
+    ara_factory_proxy_ = std::make_unique<AraFactoryProxyImpl>();
+#ifdef WITH_ARA
+    if (ara_factory_) {
+        *ara_factory_proxy_ = AraFactoryProxyImpl(ara_factory_);
+    }
+#else
+    if (ara_factory_raw_) {
+        *ara_factory_proxy_ = AraFactoryProxyImpl();
+    }
+#endif
 }
 
 ARABridge::~ARABridge() noexcept {
@@ -110,8 +124,8 @@ void ARABridge::run() {
         overload{
             [&](const AraPluginFactoryProxy::Construct&)
                 -> AraPluginFactoryProxy::Construct::Response {
-                return AraPluginFactoryProxy::ConstructArgs(
-                    get_ara_factory_raw());
+                // Return serialized ARA factory info
+                return ara_factory_proxy_->serialize_factory_info();
             },
             [&](const Vst3PluginFactoryProxy::Construct&)
                 -> Vst3PluginFactoryProxy::Construct::Response {
@@ -230,6 +244,247 @@ void ARABridge::run() {
                     .instance_id = instance_id,
                     .supports_ara = supports_ara};
             },
+            // ARA DocumentController messages
+            [&](const AraDocumentControllerProxy::CreateMusicalContextRequest& request)
+                -> MusicalContextRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return MusicalContextRefResponse{0};
+                }
+                return controller->create_musical_context(request);
+            },
+            [&](const AraDocumentControllerProxy::UpdateMusicalContextPropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_musical_context_properties(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::UpdateMusicalContextContentRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_musical_context_content(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DestroyMusicalContextRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->destroy_musical_context(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::CreateAudioSourceRequest& request)
+                -> AudioSourceRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return AudioSourceRefResponse{0};
+                }
+                return controller->create_audio_source(request);
+            },
+            [&](const AraDocumentControllerProxy::UpdateAudioSourcePropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_audio_source_properties(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::UpdateAudioSourceContentRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_audio_source_content(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::EnableAudioSourceSamplesAccessRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->enable_audio_source_samples_access(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DeactivateAudioSourceForUndoHistoryRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->deactivate_audio_source_for_undo_history(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DestroyAudioSourceRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->destroy_audio_source(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::CreateAudioModificationRequest& request)
+                -> AudioModificationRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return AudioModificationRefResponse{0};
+                }
+                return controller->create_audio_modification(request);
+            },
+            [&](const AraDocumentControllerProxy::CloneAudioModificationRequest& request)
+                -> AudioModificationRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return AudioModificationRefResponse{0};
+                }
+                return controller->clone_audio_modification(request);
+            },
+            [&](const AraDocumentControllerProxy::UpdateAudioModificationPropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_audio_modification_properties(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DeactivateAudioModificationForUndoHistoryRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->deactivate_audio_modification_for_undo_history(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DestroyAudioModificationRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->destroy_audio_modification(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::CreatePlaybackRegionRequest& request)
+                -> PlaybackRegionRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return PlaybackRegionRefResponse{0};
+                }
+                return controller->create_playback_region(request);
+            },
+            [&](const AraDocumentControllerProxy::UpdatePlaybackRegionPropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_playback_region_properties(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DestroyPlaybackRegionRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->destroy_playback_region(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::CreateRegionSequenceRequest& request)
+                -> RegionSequenceRefResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return RegionSequenceRefResponse{0};
+                }
+                return controller->create_region_sequence(request);
+            },
+            [&](const AraDocumentControllerProxy::GetRegionSequenceCountRequest& request)
+                -> CountResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return CountResponse{0};
+                }
+                return controller->get_region_sequence_count(request);
+            },
+            [&](const AraDocumentControllerProxy::GetRegionSequencePropertiesRequest& request)
+                -> RegionSequencePropertiesResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (!controller) {
+                    return RegionSequencePropertiesResponse{};
+                }
+                return controller->get_region_sequence_properties(request);
+            },
+            [&](const AraDocumentControllerProxy::SetRegionSequencePropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->set_region_sequence_properties(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::DestroyRegionSequenceRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->destroy_region_sequence(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::StoreObjectsToArchiveRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->store_objects_to_archive(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::RestoreObjectsFromArchiveRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->restore_objects_from_archive(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::AnalyzeAudioSourceRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->analyze_audio_source(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::BeginEditingRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->begin_editing(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::EndEditingRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->end_editing(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::NotifyModelUpdatesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->notify_model_updates(request);
+                }
+                return ARANullResponse{};
+            },
+            [&](const AraDocumentControllerProxy::UpdateDocumentPropertiesRequest& request)
+                -> ARANullResponse {
+                auto* controller = get_or_create_document_controller(request.controller_ref);
+                if (controller) {
+                    controller->update_document_properties(request);
+                }
+                return ARANullResponse{};
+            },
         });
 }
 
@@ -292,3 +547,255 @@ ARABridge::get_instance(size_t instance_id) noexcept {
         object_instances_.at(instance_id), std::move(lock));
 }
 
+AraDocumentControllerProxyImpl* ARABridge::get_or_create_document_controller(uint64_t ref) {
+    if (ref == 0) {
+        return nullptr;
+    }
+    
+    std::shared_lock lock(document_controllers_mutex_);
+    auto it = document_controllers_.find(ref);
+    if (it != document_controllers_.end()) {
+        return it->second.get();
+    }
+    return nullptr;
+}
+
+void ARABridge::remove_document_controller(uint64_t ref) {
+    if (ref == 0) {
+        return;
+    }
+    
+    std::unique_lock lock(document_controllers_mutex_);
+    document_controllers_.erase(ref);
+}
+
+AraDocumentControllerProxyImpl::AraDocumentControllerProxyImpl(ARABridge& bridge, Ref ref)
+    : bridge_(bridge), ref_(ref) {
+#ifdef WITH_ARA
+    // The actual ARA DocumentController would be created here
+    // For now, we just store the reference
+#endif
+}
+
+AraDocumentControllerProxyImpl::~AraDocumentControllerProxyImpl() noexcept = default;
+
+// DocumentController proxy methods - these would call into the actual ARA SDK
+// For now they are stubs that log and return default responses
+
+MusicalContextRefResponse AraDocumentControllerProxyImpl::create_musical_context(
+    const AraDocumentControllerProxy::CreateMusicalContextRequest& request) {
+    bridge_.logger_.log_info([&](auto& log) {
+        log << "ARA: CreateMusicalContext request for controller " << request.controller_ref;
+    });
+    return MusicalContextRefResponse{0, false};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_musical_context_properties(
+    const AraDocumentControllerProxy::UpdateMusicalContextPropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_musical_context_content(
+    const AraDocumentControllerProxy::UpdateMusicalContextContentRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::destroy_musical_context(
+    const AraDocumentControllerProxy::DestroyMusicalContextRequest& request) {
+    return ARANullResponse{};
+}
+
+AudioSourceRefResponse AraDocumentControllerProxyImpl::create_audio_source(
+    const AraDocumentControllerProxy::CreateAudioSourceRequest& request) {
+    return AudioSourceRefResponse{0, false};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_audio_source_properties(
+    const AraDocumentControllerProxy::UpdateAudioSourcePropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_audio_source_content(
+    const AraDocumentControllerProxy::UpdateAudioSourceContentRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::enable_audio_source_samples_access(
+    const AraDocumentControllerProxy::EnableAudioSourceSamplesAccessRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::deactivate_audio_source_for_undo_history(
+    const AraDocumentControllerProxy::DeactivateAudioSourceForUndoHistoryRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::destroy_audio_source(
+    const AraDocumentControllerProxy::DestroyAudioSourceRequest& request) {
+    return ARANullResponse{};
+}
+
+AudioModificationRefResponse AraDocumentControllerProxyImpl::create_audio_modification(
+    const AraDocumentControllerProxy::CreateAudioModificationRequest& request) {
+    return AudioModificationRefResponse{0, false};
+}
+
+AudioModificationRefResponse AraDocumentControllerProxyImpl::clone_audio_modification(
+    const AraDocumentControllerProxy::CloneAudioModificationRequest& request) {
+    return AudioModificationRefResponse{0, false};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_audio_modification_properties(
+    const AraDocumentControllerProxy::UpdateAudioModificationPropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::deactivate_audio_modification_for_undo_history(
+    const AraDocumentControllerProxy::DeactivateAudioModificationForUndoHistoryRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::destroy_audio_modification(
+    const AraDocumentControllerProxy::DestroyAudioModificationRequest& request) {
+    return ARANullResponse{};
+}
+
+PlaybackRegionRefResponse AraDocumentControllerProxyImpl::create_playback_region(
+    const AraDocumentControllerProxy::CreatePlaybackRegionRequest& request) {
+    return PlaybackRegionRefResponse{0, false};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_playback_region_properties(
+    const AraDocumentControllerProxy::UpdatePlaybackRegionPropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::destroy_playback_region(
+    const AraDocumentControllerProxy::DestroyPlaybackRegionRequest& request) {
+    return ARANullResponse{};
+}
+
+RegionSequenceRefResponse AraDocumentControllerProxyImpl::create_region_sequence(
+    const AraDocumentControllerProxy::CreateRegionSequenceRequest& request) {
+    return RegionSequenceRefResponse{0, false};
+}
+
+CountResponse AraDocumentControllerProxyImpl::get_region_sequence_count(
+    const AraDocumentControllerProxy::GetRegionSequenceCountRequest& request) {
+    return CountResponse{0};
+}
+
+RegionSequencePropertiesResponse AraDocumentControllerProxyImpl::get_region_sequence_properties(
+    const AraDocumentControllerProxy::GetRegionSequencePropertiesRequest& request) {
+    return RegionSequencePropertiesResponse{{}, false};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::set_region_sequence_properties(
+    const AraDocumentControllerProxy::SetRegionSequencePropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::destroy_region_sequence(
+    const AraDocumentControllerProxy::DestroyRegionSequenceRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::store_objects_to_archive(
+    const AraDocumentControllerProxy::StoreObjectsToArchiveRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::restore_objects_from_archive(
+    const AraDocumentControllerProxy::RestoreObjectsFromArchiveRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::analyze_audio_source(
+    const AraDocumentControllerProxy::AnalyzeAudioSourceRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::begin_editing(
+    const AraDocumentControllerProxy::BeginEditingRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::end_editing(
+    const AraDocumentControllerProxy::EndEditingRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::notify_model_updates(
+    const AraDocumentControllerProxy::NotifyModelUpdatesRequest& request) {
+    return ARANullResponse{};
+}
+
+ARANullResponse AraDocumentControllerProxyImpl::update_document_properties(
+    const AraDocumentControllerProxy::UpdateDocumentPropertiesRequest& request) {
+    return ARANullResponse{};
+}
+
+AraDocumentControllerProxyImpl* ARABridge::get_or_create_document_controller(uint64_t ref) {
+    if (ref == 0) {
+        return nullptr;
+    }
+    
+    std::shared_lock read_lock(document_controllers_mutex_);
+    auto it = document_controllers_.find(ref);
+    if (it != document_controllers_.end()) {
+        return it->second.get();
+    }
+    read_lock.unlock();
+    
+    // Create new controller if we have the ARA factory
+#ifdef WITH_ARA
+    if (ara_factory_) {
+        std::unique_lock write_lock(document_controllers_mutex_);
+        // Double-check after acquiring write lock
+        it = document_controllers_.find(ref);
+        if (it != document_controllers_.end()) {
+            return it->second.get();
+        }
+        
+        // For now, we create a new controller with a default document
+        // In a real implementation, we'd need to track which controller corresponds to which ref
+        // This is a simplified implementation
+        auto controller = std::make_unique<AraDocumentControllerProxyImpl>(*this, ref);
+        AraDocumentControllerProxyImpl* controller_ptr = controller.get();
+        document_controllers_.emplace(ref, std::move(controller));
+        return controller_ptr;
+    }
+#endif
+    
+    return nullptr;
+}
+
+void ARABridge::remove_document_controller(uint64_t ref) {
+    if (ref == 0) {
+        return;
+    }
+    
+    std::unique_lock lock(document_controllers_mutex_);
+    document_controllers_.erase(ref);
+}
+
+AraDocumentControllerProxyImpl::AraDocumentControllerProxyImpl(ARABridge& bridge, Ref ref)
+    : bridge_(bridge), ref_(ref) {
+#ifdef WITH_ARA
+    // In a full implementation, we would create the actual document controller here
+    // using the ARA factory. For now, we just store the reference.
+    if (bridge_.ara_factory_) {
+        // We would need the host instance and document properties to create the controller
+        // This is a placeholder - the actual implementation would be more complex
+    }
+#endif
+}
+
+AraDocumentControllerProxyImpl::~AraDocumentControllerProxyImpl() noexcept {
+    // Clean up the document controller if needed
+#ifdef WITH_ARA
+    if (controller_) {
+        // The controller will be destroyed by the ARA factory
+    }
+#endif
+}

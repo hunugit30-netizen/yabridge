@@ -21,16 +21,16 @@
 #include <string>
 #include <optional>
 #include <vector>
-
-#include <clap/entry.h>
-#include <clap/factory/plugin-factory.h>
-#include <clap/plugin.h>
+#include <memory>
+#include <unordered_map>
 
 #include "../../common/audio-shm.h"
 #include "../../common/communication/ara.h"
 #include "../../common/configuration.h"
 #include "../../common/mutual-recursion.h"
+#include "../../common/serialization/ara.h"
 #include "../editor.h"
+#include "ara-factory-proxy.h"
 #include "common.h"
 
 // ARA SDK headers - when available
@@ -42,6 +42,11 @@
 // VST3 Hosting
 #include <public.sdk/source/vst/hosting/module.h>
 #include <pluginterfaces/vst/ivstpluginterfaces.h>
+
+/**
+ * Forward declarations for ARA proxy classes
+ */
+class AraDocumentControllerProxyImpl;
 
 /**
  * This hosts the ARA functionality of a Windows VST3 plugin. ARA plugins are
@@ -155,6 +160,19 @@ class ARABridge : public HostBridge {
 #endif
 
     /**
+     * ARA factory proxy for serialization.
+     */
+    std::unique_ptr<AraFactoryProxyImpl> ara_factory_proxy_;
+
+    /**
+     * ARA document controller proxies, keyed by controller reference.
+     */
+    std::unordered_map<uint64_t, std::unique_ptr<AraDocumentControllerProxyImpl>>
+        document_controllers_;
+    std::shared_mutex document_controllers_mutex_;
+    std::atomic<uint64_t> next_controller_ref_{1};
+
+    /**
      * Used in `send_mutually_recursive_main_thread_message()` to be able to
      * execute functions from that same calling thread while we're waiting for a
      * response.
@@ -189,5 +207,38 @@ class ARABridge : public HostBridge {
      */
     std::pair<PluginInstance&, std::shared_lock<std::shared_mutex>>
     get_instance(size_t instance_id) noexcept;
+
+    // ARA DocumentController proxy methods
+    AraDocumentControllerProxyImpl* get_or_create_document_controller(uint64_t ref);
+    void remove_document_controller(uint64_t ref);
+};
+
+class AraDocumentControllerProxyImpl {
+   public:
+    using Ref = uint64_t;
+
+    AraDocumentControllerProxyImpl(ARABridge& bridge, Ref ref);
+    ~AraDocumentControllerProxyImpl() noexcept;
+
+    // Document controller operations
+    template <typename T>
+    typename T::Response send_control_message(const T& request) {
+        return bridge_.sockets_.plugin_host_control_.send_message(request, std::nullopt);
+    }
+
+    ARABridge& get_bridge() { return bridge_; }
+    Ref get_ref() const { return ref_; }
+
+#ifdef WITH_ARA
+    ARA::PlugIn::DocumentController* get_document_controller() { return controller_; }
+#endif
+
+   private:
+    ARABridge& bridge_;
+    Ref ref_;
+    
+#ifdef WITH_ARA
+    ARA::PlugIn::DocumentController* controller_ = nullptr;
+#endif
 };
 
