@@ -6,10 +6,17 @@ page lists some of those.
 
 # Short-ish term
 
-- [ARA](https://www.celemony.com/en/service1/about-celemony/technologies)
+- [x] [ARA](https://www.celemony.com/en/service1/about-celemony/technologies)
   support for VST3 plugins. The ARA SDK has recently been [open
   source](https://github.com/Celemony/ARA_SDK), so we can now finally start
   working on this.
+  - [x] Build system integration (meson build options, subproject)
+  - [x] Core infrastructure (PluginType enum, serialization, communication, logging)
+  - [x] Plugin-side bridge (AraPluginBridge, factory integration)
+  - [x] Wine-host side bridge (ARABridge, socket handling)
+  - [ ] Full ARA interface proxying (ARADocumentController, ARAPlaybackRenderer, etc.)
+  - [ ] Integration with VST3 IPlugInEntryPoint / IMainFactory
+  - [ ] Testing with ARA-capable plugins (Melodyne, etc.)
 
 # Longer term
 

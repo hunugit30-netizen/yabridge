@@ -75,6 +75,8 @@ PluginType plugin_type_from_string(const std::string& plugin_type) noexcept {
         return PluginType::vst2;
     } else if (plugin_type == "VST3") {
         return PluginType::vst3;
+    } else if (plugin_type == "ARA") {
+        return PluginType::ara;
     } else {
         return PluginType::unknown;
     }
@@ -89,6 +91,8 @@ std::string plugin_type_to_string(const PluginType& plugin_type) {
         return "VST2";
     } else if (plugin_type == PluginType::vst3) {
         return "VST3";
+    } else if (plugin_type == PluginType::ara) {
+        return "ARA";
     } else {
         return "<unknown>";
     }

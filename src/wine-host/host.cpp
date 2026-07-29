@@ -30,6 +30,9 @@
 #ifdef WITH_VST3
 #include "bridges/vst3.h"
 #endif
+#ifdef WITH_ARA
+#include "bridges/ara.h"
+#endif
 
 static const std::string host_name = "yabridge host version " +
                                      std::string(yabridge_git_version)
@@ -174,6 +177,19 @@ int YABRIDGE_EXPORT
                     std::cerr
                         << "This version of yabridge has not been compiled "
                            "with VST3 support"
+                        << std::endl;
+                    return 1;
+#endif
+                    break;
+                case PluginType::ara:
+#ifdef WITH_ARA
+                    bridge = std::make_unique<ARABridge>(
+                        main_context, plugin_location, socket_endpoint_path,
+                        parent_pid);
+#else
+                    std::cerr
+                        << "This version of yabridge has not been compiled "
+                           "with ARA support"
                         << std::endl;
                     return 1;
 #endif

@@ -1,0 +1,10 @@
+[wrap-git]
+url = https://github.com/Celemony/ARA_SDK.git
+# This is the ARA SDK, which provides the ARA (Audio Random Access) API headers
+# for tighter integration between VST3 plugins and hosts.
+revision = releases/2.3.0
+depth = 1
+patch_directory = ara
+
+[provide]
+ara = ara_dep

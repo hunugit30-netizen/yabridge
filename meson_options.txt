@@ -20,6 +20,13 @@ option(
 )
 
 option(
+  'ara',
+  type : 'boolean',
+  value : false,
+  description : 'Whether to build ARA (Audio Random Access) support for VST3 plugins. Requires the VST3 SDK. ARA plugins are VST3 plugins that implement additional ARA interfaces for tighter host integration.'
+)
+
+option(
   'winedbg',
   type : 'boolean',
   value : false,

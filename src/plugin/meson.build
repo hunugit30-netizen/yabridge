@@ -49,6 +49,23 @@ if with_vst3
   ]
 endif
 
+if with_ara
+  ara_plugin_deps = [
+    configuration_dep,
+
+    asio_dep,
+    bitsery_dep,
+    dbus_dep,
+    dl_dep,
+    function2_dep,
+    ghc_filesystem_dep,
+    rt_dep,
+    threads_dep,
+    tomlplusplus_dep,
+    ara_sdk_native_dep,
+  ]
+endif
+
 vst2_plugin_sources = files(
   '../common/communication/common.cpp',
   '../common/communication/vst2.cpp',
@@ -176,5 +193,28 @@ if with_vst3
     'host-process.cpp',
     'utils.cpp',
     'vst3-plugin.cpp',
+  )
+endif
+
+if with_ara
+  ara_plugin_sources = files(
+    '../common/communication/common.cpp',
+    '../common/configuration.cpp',
+    '../common/logging/ara.cpp',
+    '../common/logging/common.cpp',
+    '../common/audio-shm.cpp',
+    '../common/linking.cpp',
+    '../common/notifications.cpp',
+    '../common/plugins.cpp',
+    '../common/process.cpp',
+    '../common/serialization/ara.cpp',
+    '../common/utils.cpp',
+    '../include/llvm/small-vector.cpp',
+    'bridges/ara-impls/plugin-proxy.cpp',
+    'bridges/ara-impls/plugin-factory-proxy.cpp',
+    'bridges/ara.cpp',
+    'host-process.cpp',
+    'utils.cpp',
+    'ara-plugin.cpp',
   )
 endif

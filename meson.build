@@ -24,6 +24,7 @@ with_bitbridge = get_option('bitbridge')
 with_clap = get_option('clap')
 with_winedbg = get_option('winedbg')
 with_vst3 = get_option('vst3')
+with_ara = get_option('ara')
 
 #
 # Compiler flags
@@ -122,6 +123,10 @@ endif
 
 if with_vst3
   compiler_options += '-DWITH_VST3'
+endif
+
+if with_ara
+  compiler_options += '-DWITH_ARA'
 endif
 
 #
@@ -267,6 +272,34 @@ endif
 # dependencies from a (CMake) subproject
 if with_vst3
   subdir('src/common/vst3')
+endif
+
+# ARA SDK dependency setup (header-only, similar to VST3)
+if with_ara
+  ara = subproject('ara', version : '2.3.0')
+
+  ara_include_dir = ara.get_variable('include_dir')
+
+  # Header-only dependency for native plugin
+  ara_sdk_native_dep = declare_dependency(
+    include_directories : ara_include_dir,
+    compile_args : compiler_options,
+  )
+
+  # For Wine host builds
+  if is_64bit_system
+    ara_sdk_hosting_wine_64bit_dep = declare_dependency(
+      include_directories : ara_include_dir,
+      compile_args : compiler_options + wine_64bit_compiler_options,
+    )
+  endif
+
+  if with_bitbridge
+    ara_sdk_hosting_wine_32bit_dep = declare_dependency(
+      include_directories : ara_include_dir,
+      compile_args : compiler_options + wine_32bit_compiler_options,
+    )
+  endif
 endif
 
 #

@@ -26,6 +26,9 @@ if is_64bit_system
       wine_uuid_dep,
     ]
   endif
+  if with_ara
+    host_64bit_deps += [ara_sdk_hosting_wine_64bit_dep]
+  endif
 endif
 
 if with_bitbridge
@@ -53,6 +56,9 @@ if with_bitbridge
       wine_shell32_dep,
       wine_uuid_dep,
     ]
+  endif
+  if with_ara
+    host_32bit_deps += [ara_sdk_hosting_wine_32bit_dep]
   endif
 endif
 
@@ -158,5 +164,13 @@ if with_vst3
     'bridges/vst3-impls/host-context-proxy.cpp',
     'bridges/vst3-impls/plug-frame-proxy.cpp',
     'bridges/vst3.cpp',
+  )
+endif
+
+if with_ara
+  host_sources += files(
+    '../common/logging/ara.cpp',
+    '../common/serialization/ara.cpp',
+    'bridges/ara.cpp',
   )
 endif
