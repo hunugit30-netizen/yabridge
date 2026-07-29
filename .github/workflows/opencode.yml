@@ -25,6 +25,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Start nginx rate limiter
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
